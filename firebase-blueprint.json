@@ -1,0 +1,336 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account, notification preferences, and Stripe subscription state.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "planTier": { "type": "string", "enum": ["free", "starter_rx", "business_rx", "growth_rx"] },
+        "subscriptionStatus": { "type": "string", "enum": ["inactive", "active", "past_due", "canceled", "unconfigured"] },
+        "stripeCustomerId": { "type": "string", "maxLength": 120 },
+        "stripeSubscriptionId": { "type": "string", "maxLength": 120 },
+        "reminderEmailEnabled": { "type": "boolean" },
+        "reminderInAppEnabled": { "type": "boolean" },
+        "reminderLeadDays": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "planTier", "subscriptionStatus", "reminderEmailEnabled", "reminderInAppEnabled", "reminderLeadDays", "createdAt", "updatedAt"]
+    },
+    "Business": {
+      "title": "Business",
+      "description": "Primary business profile and assessment questionnaire responses.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "industry": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "activity": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "country": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "stateProvince": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 100 },
+        "jurisdictions": { "type": "array" },
+        "stage": { "type": "string", "enum": ["new", "existing"] },
+        "legalStructure": { "type": "string", "enum": ["sole_proprietorship", "llc", "corporation", "s_corp", "partnership", "nonprofit", "undecided"] },
+        "employeeCount": { "type": "integer" },
+        "operatingModel": { "type": "string", "enum": ["physical", "online", "both"] },
+        "existingRegistrations": { "type": "array" },
+        "bankingEstablished": { "type": "boolean" },
+        "bookkeepingEstablished": { "type": "boolean" },
+        "offeringType": { "type": "string", "enum": ["products", "services", "both"] },
+        "workerTypes": { "type": "string", "enum": ["none", "employees", "contractors", "both"] },
+        "marketingChannels": { "type": "array" },
+        "goals": { "type": "array" },
+        "assessmentVersion": { "type": "integer" },
+        "onboardingComplete": { "type": "boolean" },
+        "blueprintApprovedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "industry", "activity", "country", "stateProvince", "city", "jurisdictions", "stage", "legalStructure", "employeeCount", "operatingModel", "existingRegistrations", "bankingEstablished", "bookkeepingEstablished", "offeringType", "workerTypes", "marketingChannels", "goals", "assessmentVersion", "onboardingComplete", "createdAt", "updatedAt"]
+    },
+    "BlueprintItem": {
+      "title": "BlueprintItem",
+      "description": "Structured Gemini-generated business blueprint responsibility item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "categoryId": { "type": "string", "maxLength": 60 },
+        "categoryNumber": { "type": "integer" },
+        "categoryName": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "whyItMatters": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "cadenceType": { "type": "string", "enum": ["one_time", "recurring"] },
+        "suggestedDeadlineOrFrequency": { "type": "string", "maxLength": 120 },
+        "recurrenceIntervalDays": { "type": "integer" },
+        "responsiblePerson": { "type": "string", "maxLength": 120 },
+        "applicableJurisdiction": { "type": "string", "maxLength": 200 },
+        "officialSourceUrl": { "type": "string", "maxLength": 500 },
+        "verificationStatus": { "type": "string", "enum": ["verified_requirement", "recommendation", "needs_confirmation"] },
+        "completionStatus": { "type": "string", "enum": ["pending_approval", "approved", "in_progress", "completed", "dismissed"] },
+        "requiresExplicitApproval": { "type": "boolean" },
+        "approvedByOwner": { "type": "boolean" },
+        "assessmentVersion": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "categoryId", "categoryNumber", "categoryName", "title", "description", "whyItMatters", "priority", "cadenceType", "suggestedDeadlineOrFrequency", "recurrenceIntervalDays", "responsiblePerson", "applicableJurisdiction", "officialSourceUrl", "verificationStatus", "completionStatus", "requiresExplicitApproval", "approvedByOwner", "assessmentVersion", "createdAt", "updatedAt"]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "Actionable one-time or recurring business task created from approved blueprint items or manually.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "blueprintItemId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "categoryId": { "type": "string", "maxLength": 60 },
+        "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "taskType": { "type": "string", "enum": ["one_time", "recurring"] },
+        "recurrenceIntervalDays": { "type": "integer" },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "nextDueDate": { "type": "string", "maxLength": 30 },
+        "assignee": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["todo", "in_progress", "awaiting_approval", "completed"] },
+        "requiresExplicitApproval": { "type": "boolean" },
+        "explicitlyApproved": { "type": "boolean" },
+        "consequentialActionType": { "type": "string", "enum": ["none", "payment", "legal_filing", "external_communication"] },
+        "dedupeKey": { "type": "string", "maxLength": 180 },
+        "completedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "blueprintItemId", "title", "description", "categoryId", "priority", "taskType", "recurrenceIntervalDays", "dueDate", "nextDueDate", "assignee", "status", "requiresExplicitApproval", "explicitlyApproved", "consequentialActionType", "dedupeKey", "completedAt", "createdAt", "updatedAt"]
+    },
+    "Obligation": {
+      "title": "Obligation",
+      "description": "Tracked bills, licenses, insurance policies, and certifications.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recordType": { "type": "string", "enum": ["bill", "license", "insurance", "certification"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "issuerOrVendor": { "type": "string", "maxLength": 160 },
+        "jurisdiction": { "type": "string", "maxLength": 160 },
+        "referenceNumber": { "type": "string", "maxLength": 100 },
+        "amountCents": { "type": "integer" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "dueOrExpiryDate": { "type": "string", "maxLength": 30 },
+        "recurrenceIntervalDays": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "due_soon", "overdue", "paid_or_renewed", "needs_confirmation"] },
+        "officialSourceUrl": { "type": "string", "maxLength": 500 },
+        "requiresExplicitApproval": { "type": "boolean" },
+        "approvedForAction": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "recordType", "title", "issuerOrVendor", "jurisdiction", "referenceNumber", "amountCents", "currency", "dueOrExpiryDate", "recurrenceIntervalDays", "status", "officialSourceUrl", "requiresExplicitApproval", "approvedForAction", "notes", "createdAt", "updatedAt"]
+    },
+    "DocumentRecord": {
+      "title": "DocumentRecord",
+      "description": "Metadata for private business documents stored securely.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "docCategory": { "type": "string", "enum": ["formation", "license", "tax", "insurance", "contract", "hr", "financial", "other"] },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "mimeType": { "type": "string", "maxLength": 120 },
+        "sizeBytes": { "type": "integer" },
+        "storagePath": { "type": "string", "maxLength": 400 },
+        "linkedObligationId": { "type": "string", "maxLength": 128 },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "title", "docCategory", "fileName", "mimeType", "sizeBytes", "storagePath", "linkedObligationId", "uploadedAt", "updatedAt"]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Employee or contractor record with certification deadline tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "email": { "type": "string", "maxLength": 254 },
+        "roleTitle": { "type": "string", "maxLength": 120 },
+        "workerClassification": { "type": "string", "enum": ["employee_w2", "contractor_1099", "owner"] },
+        "certificationName": { "type": "string", "maxLength": 160 },
+        "certificationExpiry": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["active", "onboarding", "offboarded"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "fullName", "email", "roleTitle", "workerClassification", "certificationName", "certificationExpiry", "status", "createdAt", "updatedAt"]
+    },
+    "FinancialEntry": {
+      "title": "FinancialEntry",
+      "description": "Revenue, expense, or tax reserve bookkeeping entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "entryType": { "type": "string", "enum": ["revenue", "expense", "tax_reserve"] },
+        "category": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "amountCents": { "type": "integer" },
+        "entryDate": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "entryType", "category", "description", "amountCents", "entryDate", "createdAt", "updatedAt"]
+    },
+    "NotificationLog": {
+      "title": "NotificationLog",
+      "description": "In-app and email reminder delivery log with dedupe keys.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dedupeKey": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "channel": { "type": "string", "enum": ["in_app", "email"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "relatedEntityType": { "type": "string", "enum": ["task", "obligation", "certification", "blueprint"] },
+        "relatedEntityId": { "type": "string", "maxLength": 128 },
+        "deliveryStatus": { "type": "string", "enum": ["delivered", "read", "skipped_no_email_provider", "failed"] },
+        "scheduledFor": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "dedupeKey", "channel", "title", "message", "relatedEntityType", "relatedEntityId", "deliveryStatus", "scheduledFor", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only security and approval audit log for business actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "entityType": { "type": "string", "maxLength": 80 },
+        "entityId": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "action", "actorEmail", "entityType", "entityId", "summary", "createdAt"]
+    },
+    "MarketingCampaign": {
+      "title": "MarketingCampaign",
+      "description": "Growth and customer acquisition campaign plan with external send approval gate.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "channel": { "type": "string", "maxLength": 100 },
+        "campaignName": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "goal": { "type": "string", "maxLength": 400 },
+        "targetMetric": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["planned", "active", "paused", "completed"] },
+        "requiresExternalSendApproval": { "type": "boolean" },
+        "approvedByOwner": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "channel", "campaignName", "goal", "targetMetric", "status", "requiresExternalSendApproval", "approvedByOwner", "createdAt", "updatedAt"]
+    },
+    "SocialCalendarDay": {
+      "title": "SocialCalendarDay",
+      "description": "One day of a 30-day customer acquisition social media content calendar with daily mini-task checklist.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "dayNumber": { "type": "integer" },
+        "scheduledDate": { "type": "string", "maxLength": 30 },
+        "platform": { "type": "string", "maxLength": 80 },
+        "contentPillar": { "type": "string", "maxLength": 80 },
+        "topicTitle": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "hookOrAngle": { "type": "string", "maxLength": 400 },
+        "captionDraft": { "type": "string", "maxLength": 2000 },
+        "callToAction": { "type": "string", "maxLength": 300 },
+        "miniTasks": { "type": "array" },
+        "completedMiniTasks": { "type": "array" },
+        "requiresExternalPublishApproval": { "type": "boolean" },
+        "approvedToPublish": { "type": "boolean" },
+        "dayStatus": { "type": "string", "enum": ["planned", "ready", "published"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "dayNumber", "scheduledDate", "platform", "contentPillar", "topicTitle", "hookOrAngle", "captionDraft", "callToAction", "miniTasks", "completedMiniTasks", "requiresExternalPublishApproval", "approvedToPublish", "dayStatus", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only user profile and subscription settings."
+    },
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/Business" },
+      "description": "Business entity and assessment answers owned by ownerUid."
+    },
+    "/businesses/{businessId}/blueprintItems/{itemId}": {
+      "schema": { "$ref": "#/entities/BlueprintItem" },
+      "description": "AI-generated and user-approved blueprint items under a business."
+    },
+    "/businesses/{businessId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/TaskItem" },
+      "description": "One-time and recurring tasks derived from blueprint or user."
+    },
+    "/businesses/{businessId}/obligations/{obligationId}": {
+      "schema": { "$ref": "#/entities/Obligation" },
+      "description": "Tracked bills, licenses, insurance, and renewals."
+    },
+    "/businesses/{businessId}/documents/{docId}": {
+      "schema": { "$ref": "#/entities/DocumentRecord" },
+      "description": "Private document metadata records."
+    },
+    "/businesses/{businessId}/teamMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMember" },
+      "description": "Employees and contractors with certification expiration tracking."
+    },
+    "/businesses/{businessId}/financialEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/FinancialEntry" },
+      "description": "Financial ledger entries for revenue, expenses, and tax reserves."
+    },
+    "/businesses/{businessId}/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/NotificationLog" },
+      "description": "Notification delivery log with deduplication keys."
+    },
+    "/businesses/{businessId}/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Append-only business audit trail."
+    },
+    "/businesses/{businessId}/marketingCampaigns/{campaignId}": {
+      "schema": { "$ref": "#/entities/MarketingCampaign" },
+      "description": "Marketing and growth campaigns with explicit approval tracking."
+    },
+    "/businesses/{businessId}/socialCalendarDays/{dayId}": {
+      "schema": { "$ref": "#/entities/SocialCalendarDay" },
+      "description": "30-day customer acquisition social media content calendar with daily mini-tasks."
+    }
+  }
+}

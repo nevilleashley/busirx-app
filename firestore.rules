@@ -1,0 +1,683 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isBusinessOwner(businessId) {
+      return isVerifiedUser()
+        && isValidId(businessId)
+        && exists(/databases/$(database)/documents/businesses/$(businessId))
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid;
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidList(val, maxItems) {
+      return val is list && val.size() <= maxItems && (val.size() == 0 || val[0] is string);
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'planTier', 'subscriptionStatus',
+          'reminderEmailEnabled', 'reminderInAppEnabled', 'reminderLeadDays',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'planTier', 'subscriptionStatus',
+          'stripeCustomerId', 'stripeSubscriptionId',
+          'reminderEmailEnabled', 'reminderInAppEnabled', 'reminderLeadDays',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid == request.auth.uid
+        && isValidId(data.uid)
+        && isValidString(data.email, 3, 254)
+        && isValidString(data.displayName, 0, 120)
+        && data.planTier in ['free', 'starter_rx', 'business_rx', 'growth_rx']
+        && data.subscriptionStatus in ['inactive', 'active', 'past_due', 'canceled', 'unconfigured']
+        && (!('stripeCustomerId' in data) || isValidString(data.stripeCustomerId, 0, 120))
+        && (!('stripeSubscriptionId' in data) || isValidString(data.stripeSubscriptionId, 0, 120))
+        && data.reminderEmailEnabled is bool
+        && data.reminderInAppEnabled is bool
+        && data.reminderLeadDays is int && data.reminderLeadDays >= 1 && data.reminderLeadDays <= 90
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBusiness(data, businessId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'industry', 'activity', 'country',
+          'stateProvince', 'city', 'jurisdictions', 'stage', 'legalStructure',
+          'employeeCount', 'operatingModel', 'existingRegistrations',
+          'bankingEstablished', 'bookkeepingEstablished', 'offeringType',
+          'workerTypes', 'marketingChannels', 'goals', 'assessmentVersion',
+          'onboardingComplete', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'industry', 'activity', 'country',
+          'stateProvince', 'city', 'jurisdictions', 'stage', 'legalStructure',
+          'employeeCount', 'operatingModel', 'existingRegistrations',
+          'bankingEstablished', 'bookkeepingEstablished', 'offeringType',
+          'workerTypes', 'marketingChannels', 'goals', 'assessmentVersion',
+          'onboardingComplete', 'blueprintApprovedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.id == businessId
+        && isValidId(data.id)
+        && data.ownerUid == request.auth.uid
+        && isValidId(data.ownerUid)
+        && isValidString(data.name, 1, 160)
+        && isValidString(data.industry, 1, 120)
+        && isValidString(data.activity, 1, 500)
+        && isValidString(data.country, 1, 100)
+        && isValidString(data.stateProvince, 0, 100)
+        && isValidString(data.city, 0, 100)
+        && isValidList(data.jurisdictions, 15)
+        && data.stage in ['new', 'existing']
+        && data.legalStructure in ['sole_proprietorship', 'llc', 'corporation', 's_corp', 'partnership', 'nonprofit', 'undecided']
+        && data.employeeCount is int && data.employeeCount >= 0 && data.employeeCount <= 100000
+        && data.operatingModel in ['physical', 'online', 'both']
+        && isValidList(data.existingRegistrations, 30)
+        && data.bankingEstablished is bool
+        && data.bookkeepingEstablished is bool
+        && data.offeringType in ['products', 'services', 'both']
+        && data.workerTypes in ['none', 'employees', 'contractors', 'both']
+        && isValidList(data.marketingChannels, 20)
+        && isValidList(data.goals, 20)
+        && data.assessmentVersion is int && data.assessmentVersion >= 1 && data.assessmentVersion <= 1000
+        && data.onboardingComplete is bool
+        && (!('blueprintApprovedAt' in data) || isValidString(data.blueprintApprovedAt, 0, 40))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBlueprintItem(data, businessId, itemId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'categoryId', 'categoryNumber', 'categoryName',
+          'title', 'description', 'whyItMatters', 'priority', 'cadenceType',
+          'suggestedDeadlineOrFrequency', 'recurrenceIntervalDays', 'responsiblePerson',
+          'applicableJurisdiction', 'officialSourceUrl', 'verificationStatus',
+          'completionStatus', 'requiresExplicitApproval', 'approvedByOwner',
+          'assessmentVersion', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'categoryId', 'categoryNumber', 'categoryName',
+          'title', 'description', 'whyItMatters', 'priority', 'cadenceType',
+          'suggestedDeadlineOrFrequency', 'recurrenceIntervalDays', 'responsiblePerson',
+          'applicableJurisdiction', 'officialSourceUrl', 'verificationStatus',
+          'completionStatus', 'requiresExplicitApproval', 'approvedByOwner',
+          'assessmentVersion', 'createdAt', 'updatedAt'
+        ])
+        && data.id == itemId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.categoryId, 1, 60)
+        && data.categoryNumber is int && data.categoryNumber >= 1 && data.categoryNumber <= 10
+        && isValidString(data.categoryName, 1, 120)
+        && isValidString(data.title, 1, 200)
+        && isValidString(data.description, 1, 2000)
+        && isValidString(data.whyItMatters, 1, 1000)
+        && data.priority in ['critical', 'high', 'medium', 'low']
+        && data.cadenceType in ['one_time', 'recurring']
+        && isValidString(data.suggestedDeadlineOrFrequency, 1, 120)
+        && data.recurrenceIntervalDays is int && data.recurrenceIntervalDays >= 0 && data.recurrenceIntervalDays <= 3650
+        && isValidString(data.responsiblePerson, 1, 120)
+        && isValidString(data.applicableJurisdiction, 1, 200)
+        && isValidString(data.officialSourceUrl, 0, 500)
+        && data.verificationStatus in ['verified_requirement', 'recommendation', 'needs_confirmation']
+        && data.completionStatus in ['pending_approval', 'approved', 'in_progress', 'completed', 'dismissed']
+        && data.requiresExplicitApproval is bool
+        && data.approvedByOwner is bool
+        && data.assessmentVersion is int && data.assessmentVersion >= 1
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTask(data, businessId, taskId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'blueprintItemId', 'title', 'description',
+          'categoryId', 'priority', 'taskType', 'recurrenceIntervalDays', 'dueDate',
+          'nextDueDate', 'assignee', 'status', 'requiresExplicitApproval',
+          'explicitlyApproved', 'consequentialActionType', 'dedupeKey',
+          'completedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'blueprintItemId', 'title', 'description',
+          'categoryId', 'priority', 'taskType', 'recurrenceIntervalDays', 'dueDate',
+          'nextDueDate', 'assignee', 'status', 'requiresExplicitApproval',
+          'explicitlyApproved', 'consequentialActionType', 'dedupeKey',
+          'completedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.id == taskId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.blueprintItemId, 0, 128)
+        && isValidString(data.title, 1, 200)
+        && isValidString(data.description, 0, 2000)
+        && isValidString(data.categoryId, 1, 60)
+        && data.priority in ['critical', 'high', 'medium', 'low']
+        && data.taskType in ['one_time', 'recurring']
+        && data.recurrenceIntervalDays is int && data.recurrenceIntervalDays >= 0 && data.recurrenceIntervalDays <= 3650
+        && isValidString(data.dueDate, 0, 30)
+        && isValidString(data.nextDueDate, 0, 30)
+        && isValidString(data.assignee, 1, 120)
+        && data.status in ['todo', 'in_progress', 'awaiting_approval', 'completed']
+        && data.requiresExplicitApproval is bool
+        && data.explicitlyApproved is bool
+        && data.consequentialActionType in ['none', 'payment', 'legal_filing', 'external_communication']
+        && isValidString(data.dedupeKey, 0, 180)
+        && isValidString(data.completedAt, 0, 40)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!(data.requiresExplicitApproval && data.status == 'completed') || data.explicitlyApproved == true);
+    }
+
+    function isValidObligation(data, businessId, obligationId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'recordType', 'title', 'issuerOrVendor',
+          'jurisdiction', 'referenceNumber', 'amountCents', 'currency',
+          'dueOrExpiryDate', 'recurrenceIntervalDays', 'status', 'officialSourceUrl',
+          'requiresExplicitApproval', 'approvedForAction', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'recordType', 'title', 'issuerOrVendor',
+          'jurisdiction', 'referenceNumber', 'amountCents', 'currency',
+          'dueOrExpiryDate', 'recurrenceIntervalDays', 'status', 'officialSourceUrl',
+          'requiresExplicitApproval', 'approvedForAction', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.id == obligationId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && data.recordType in ['bill', 'license', 'insurance', 'certification']
+        && isValidString(data.title, 1, 200)
+        && isValidString(data.issuerOrVendor, 0, 160)
+        && isValidString(data.jurisdiction, 0, 160)
+        && isValidString(data.referenceNumber, 0, 100)
+        && data.amountCents is int && data.amountCents >= 0 && data.amountCents <= 1000000000
+        && isValidString(data.currency, 1, 10)
+        && isValidString(data.dueOrExpiryDate, 0, 30)
+        && data.recurrenceIntervalDays is int && data.recurrenceIntervalDays >= 0 && data.recurrenceIntervalDays <= 3650
+        && data.status in ['active', 'due_soon', 'overdue', 'paid_or_renewed', 'needs_confirmation']
+        && isValidString(data.officialSourceUrl, 0, 500)
+        && data.requiresExplicitApproval is bool
+        && data.approvedForAction is bool
+        && isValidString(data.notes, 0, 1500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDocument(data, businessId, docId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'title', 'docCategory', 'fileName',
+          'mimeType', 'sizeBytes', 'storagePath', 'linkedObligationId',
+          'uploadedAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'title', 'docCategory', 'fileName',
+          'mimeType', 'sizeBytes', 'storagePath', 'linkedObligationId',
+          'uploadedAt', 'updatedAt'
+        ])
+        && data.id == docId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.title, 1, 200)
+        && data.docCategory in ['formation', 'license', 'tax', 'insurance', 'contract', 'hr', 'financial', 'other']
+        && isValidString(data.fileName, 1, 200)
+        && isValidString(data.mimeType, 1, 120)
+        && data.sizeBytes is int && data.sizeBytes >= 0 && data.sizeBytes <= 20971520
+        && isValidString(data.storagePath, 0, 400)
+        && isValidString(data.linkedObligationId, 0, 128)
+        && data.uploadedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTeamMember(data, businessId, memberId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'fullName', 'email', 'roleTitle',
+          'workerClassification', 'certificationName', 'certificationExpiry',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'fullName', 'email', 'roleTitle',
+          'workerClassification', 'certificationName', 'certificationExpiry',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.id == memberId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.fullName, 1, 140)
+        && isValidString(data.email, 0, 254)
+        && isValidString(data.roleTitle, 0, 120)
+        && data.workerClassification in ['employee_w2', 'contractor_1099', 'owner']
+        && isValidString(data.certificationName, 0, 160)
+        && isValidString(data.certificationExpiry, 0, 30)
+        && data.status in ['active', 'onboarding', 'offboarded']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFinancialEntry(data, businessId, entryId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'entryType', 'category',
+          'description', 'amountCents', 'entryDate', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'entryType', 'category',
+          'description', 'amountCents', 'entryDate', 'createdAt', 'updatedAt'
+        ])
+        && data.id == entryId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && data.entryType in ['revenue', 'expense', 'tax_reserve']
+        && isValidString(data.category, 1, 100)
+        && isValidString(data.description, 0, 300)
+        && data.amountCents is int && data.amountCents >= 0 && data.amountCents <= 1000000000
+        && isValidString(data.entryDate, 1, 30)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data, businessId, notifId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'dedupeKey', 'channel', 'title',
+          'message', 'relatedEntityType', 'relatedEntityId', 'deliveryStatus',
+          'scheduledFor', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'dedupeKey', 'channel', 'title',
+          'message', 'relatedEntityType', 'relatedEntityId', 'deliveryStatus',
+          'scheduledFor', 'createdAt', 'updatedAt'
+        ])
+        && data.id == notifId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.dedupeKey, 1, 200)
+        && data.channel in ['in_app', 'email']
+        && isValidString(data.title, 1, 200)
+        && isValidString(data.message, 1, 1000)
+        && data.relatedEntityType in ['task', 'obligation', 'certification', 'blueprint']
+        && isValidString(data.relatedEntityId, 0, 128)
+        && data.deliveryStatus in ['delivered', 'read', 'skipped_no_email_provider', 'failed']
+        && isValidString(data.scheduledFor, 0, 40)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data, businessId, logId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'action', 'actorEmail',
+          'entityType', 'entityId', 'summary', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'action', 'actorEmail',
+          'entityType', 'entityId', 'summary', 'createdAt'
+        ])
+        && data.id == logId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.action, 1, 120)
+        && isValidString(data.actorEmail, 0, 254)
+        && isValidString(data.entityType, 1, 80)
+        && isValidString(data.entityId, 0, 128)
+        && isValidString(data.summary, 1, 500)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidMarketingCampaign(data, businessId, campaignId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'channel', 'campaignName', 'goal',
+          'targetMetric', 'status', 'requiresExternalSendApproval',
+          'approvedByOwner', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'channel', 'campaignName', 'goal',
+          'targetMetric', 'status', 'requiresExternalSendApproval',
+          'approvedByOwner', 'createdAt', 'updatedAt'
+        ])
+        && data.id == campaignId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.channel, 1, 100)
+        && isValidString(data.campaignName, 1, 180)
+        && isValidString(data.goal, 0, 400)
+        && isValidString(data.targetMetric, 0, 160)
+        && data.status in ['planned', 'active', 'paused', 'completed']
+        && data.requiresExternalSendApproval is bool
+        && data.approvedByOwner is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSocialCalendarDay(data, businessId, dayId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'dayNumber', 'scheduledDate', 'platform',
+          'contentPillar', 'topicTitle', 'hookOrAngle', 'captionDraft', 'callToAction',
+          'miniTasks', 'completedMiniTasks', 'requiresExternalPublishApproval',
+          'approvedToPublish', 'dayStatus', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'dayNumber', 'scheduledDate', 'platform',
+          'contentPillar', 'topicTitle', 'hookOrAngle', 'captionDraft', 'callToAction',
+          'miniTasks', 'completedMiniTasks', 'requiresExternalPublishApproval',
+          'approvedToPublish', 'dayStatus', 'createdAt', 'updatedAt'
+        ])
+        && data.id == dayId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && data.dayNumber is int && data.dayNumber >= 1 && data.dayNumber <= 30
+        && isValidString(data.scheduledDate, 0, 30)
+        && isValidString(data.platform, 1, 80)
+        && isValidString(data.contentPillar, 1, 80)
+        && isValidString(data.topicTitle, 1, 200)
+        && isValidString(data.hookOrAngle, 0, 400)
+        && isValidString(data.captionDraft, 0, 2000)
+        && isValidString(data.callToAction, 0, 300)
+        && isValidList(data.miniTasks, 8)
+        && isValidList(data.completedMiniTasks, 8)
+        && data.requiresExternalPublishApproval is bool
+        && data.approvedToPublish is bool
+        && data.dayStatus in ['planned', 'ready', 'published']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!(data.requiresExternalPublishApproval && data.dayStatus == 'published') || data.approvedToPublish == true);
+    }
+
+    // Users collection (strictly private PII)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'reminderEmailEnabled', 'reminderInAppEnabled', 'reminderLeadDays', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['planTier', 'subscriptionStatus', 'stripeCustomerId', 'stripeSubscriptionId', 'updatedAt'])
+        );
+      allow delete: if isValidId(userId) && isOwner(userId);
+    }
+
+    // Businesses collection
+    match /businesses/{businessId} {
+      allow get: if isValidId(businessId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
+      allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isValidId(businessId)
+        && isVerifiedUser()
+        && isValidBusiness(incoming(), businessId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(businessId)
+        && isVerifiedUser()
+        && existing().ownerUid == request.auth.uid
+        && isValidBusiness(incoming(), businessId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'industry', 'activity', 'country', 'stateProvince', 'city',
+            'jurisdictions', 'stage', 'legalStructure', 'employeeCount', 'operatingModel',
+            'existingRegistrations', 'bankingEstablished', 'bookkeepingEstablished',
+            'offeringType', 'workerTypes', 'marketingChannels', 'goals',
+            'assessmentVersion', 'onboardingComplete', 'updatedAt'
+          ])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['blueprintApprovedAt', 'updatedAt'])
+        );
+      allow delete: if isValidId(businessId) && isVerifiedUser() && existing().ownerUid == request.auth.uid;
+
+      match /blueprintItems/{itemId} {
+        allow get: if isValidId(itemId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(itemId)
+          && isBusinessOwner(businessId)
+          && isValidBlueprintItem(incoming(), businessId, itemId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(itemId)
+          && isBusinessOwner(businessId)
+          && isValidBlueprintItem(incoming(), businessId, itemId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['completionStatus', 'approvedByOwner', 'responsiblePerson', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'description', 'whyItMatters', 'priority', 'cadenceType',
+              'suggestedDeadlineOrFrequency', 'recurrenceIntervalDays', 'responsiblePerson',
+              'applicableJurisdiction', 'officialSourceUrl', 'verificationStatus',
+              'completionStatus', 'requiresExplicitApproval', 'approvedByOwner',
+              'assessmentVersion', 'updatedAt'
+            ])
+          );
+        allow delete: if isValidId(itemId) && isBusinessOwner(businessId);
+      }
+
+      match /tasks/{taskId} {
+        allow get: if isValidId(taskId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(taskId)
+          && isBusinessOwner(businessId)
+          && isValidTask(incoming(), businessId, taskId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(taskId)
+          && isBusinessOwner(businessId)
+          && isValidTask(incoming(), businessId, taskId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'completedAt', 'dueDate', 'nextDueDate', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['explicitlyApproved', 'status', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'priority', 'assignee', 'dueDate', 'nextDueDate', 'recurrenceIntervalDays', 'updatedAt'])
+          );
+        allow delete: if isValidId(taskId) && isBusinessOwner(businessId);
+      }
+
+      match /obligations/{obligationId} {
+        allow get: if isValidId(obligationId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(obligationId)
+          && isBusinessOwner(businessId)
+          && isValidObligation(incoming(), businessId, obligationId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(obligationId)
+          && isBusinessOwner(businessId)
+          && isValidObligation(incoming(), businessId, obligationId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'dueOrExpiryDate', 'approvedForAction', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['title', 'issuerOrVendor', 'jurisdiction', 'referenceNumber', 'amountCents', 'dueOrExpiryDate', 'recurrenceIntervalDays', 'status', 'officialSourceUrl', 'requiresExplicitApproval', 'approvedForAction', 'notes', 'updatedAt'])
+          );
+        allow delete: if isValidId(obligationId) && isBusinessOwner(businessId);
+      }
+
+      match /documents/{docId} {
+        allow get: if isValidId(docId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(docId)
+          && isBusinessOwner(businessId)
+          && isValidDocument(incoming(), businessId, docId)
+          && incoming().uploadedAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(docId)
+          && isBusinessOwner(businessId)
+          && isValidDocument(incoming(), businessId, docId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().uploadedAt == existing().uploadedAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'docCategory', 'linkedObligationId', 'updatedAt']);
+        allow delete: if isValidId(docId) && isBusinessOwner(businessId);
+      }
+
+      match /teamMembers/{memberId} {
+        allow get: if isValidId(memberId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(memberId)
+          && isBusinessOwner(businessId)
+          && isValidTeamMember(incoming(), businessId, memberId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(memberId)
+          && isBusinessOwner(businessId)
+          && isValidTeamMember(incoming(), businessId, memberId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'fullName', 'email', 'roleTitle', 'workerClassification',
+            'certificationName', 'certificationExpiry', 'status', 'updatedAt'
+          ]);
+        allow delete: if isValidId(memberId) && isBusinessOwner(businessId);
+      }
+
+      match /financialEntries/{entryId} {
+        allow get: if isValidId(entryId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(entryId)
+          && isBusinessOwner(businessId)
+          && isValidFinancialEntry(incoming(), businessId, entryId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(entryId)
+          && isBusinessOwner(businessId)
+          && isValidFinancialEntry(incoming(), businessId, entryId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['entryType', 'category', 'description', 'amountCents', 'entryDate', 'updatedAt']);
+        allow delete: if isValidId(entryId) && isBusinessOwner(businessId);
+      }
+
+      match /notifications/{notifId} {
+        allow get: if isValidId(notifId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(notifId)
+          && isBusinessOwner(businessId)
+          && isValidNotification(incoming(), businessId, notifId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(notifId)
+          && isBusinessOwner(businessId)
+          && isValidNotification(incoming(), businessId, notifId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().dedupeKey == existing().dedupeKey
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['deliveryStatus', 'updatedAt']);
+        allow delete: if isValidId(notifId) && isBusinessOwner(businessId);
+      }
+
+      match /auditLogs/{logId} {
+        allow get: if isValidId(logId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(logId)
+          && isBusinessOwner(businessId)
+          && isValidAuditLog(incoming(), businessId, logId)
+          && incoming().createdAt == request.time;
+        allow update: if false;
+        allow delete: if isValidId(logId) && isBusinessOwner(businessId);
+      }
+
+      match /marketingCampaigns/{campaignId} {
+        allow get: if isValidId(campaignId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(campaignId)
+          && isBusinessOwner(businessId)
+          && isValidMarketingCampaign(incoming(), businessId, campaignId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(campaignId)
+          && isBusinessOwner(businessId)
+          && isValidMarketingCampaign(incoming(), businessId, campaignId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'approvedByOwner', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['channel', 'campaignName', 'goal', 'targetMetric', 'status', 'approvedByOwner', 'updatedAt'])
+          );
+        allow delete: if isValidId(campaignId) && isBusinessOwner(businessId);
+      }
+
+      match /socialCalendarDays/{dayId} {
+        allow get: if isValidId(dayId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(dayId)
+          && isBusinessOwner(businessId)
+          && isValidSocialCalendarDay(incoming(), businessId, dayId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(dayId)
+          && isBusinessOwner(businessId)
+          && isValidSocialCalendarDay(incoming(), businessId, dayId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().dayNumber == existing().dayNumber
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['completedMiniTasks', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['approvedToPublish', 'dayStatus', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['captionDraft', 'callToAction', 'hookOrAngle', 'scheduledDate', 'updatedAt'])
+          );
+        allow delete: if isValidId(dayId) && isBusinessOwner(businessId);
+      }
+    }
+  }
+}
