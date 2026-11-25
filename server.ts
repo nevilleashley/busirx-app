@@ -1,13 +1,22 @@
 import 'dotenv/config';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import { isIP } from 'net';
+import http from 'http';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import Stripe from 'stripe';
-import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import {
+  GoogleGenAI,
+  Modality,
+  ThinkingLevel,
+  Type,
+  type LiveServerMessage,
+} from '@google/genai';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
@@ -117,6 +126,11 @@ const GenerateBlueprintBodySchema = z.object({
 
 const AssistantChatSchema = z.object({
   message: z.string().min(1).max(2000),
+  rolePreset: z
+    .enum(['advisor', 'compliance', 'marketing', 'operations'])
+    .optional()
+    .default('advisor'),
+  modelTier: z.enum(['general', 'fast']).optional().default('general'),
   history: z
     .array(
       z.object({
@@ -140,6 +154,20 @@ const AssistantChatSchema = z.object({
   }),
 });
 
+const TranscribeAudioSchema = z.object({
+  audioBase64: z.string().min(1).max(15000000),
+  mimeType: z.enum([
+    'audio/webm',
+    'audio/mp4',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/wav',
+    'audio/ogg',
+    'audio/aac',
+  ]),
+  promptHint: z.string().max(300).optional(),
+});
+
 const CheckoutBodySchema = z.object({
   planTier: z.enum(['starter_rx', 'business_rx', 'growth_rx']),
 });
@@ -149,6 +177,18 @@ const GenerateSocialCalendarSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   focusGoal: z.string().max(300).optional(),
   assessment: AssessmentSchema,
+});
+
+const DraftLeadFollowUpSchema = z.object({
+  businessName: z.string().min(1).max(160),
+  industry: z.string().min(1).max(120),
+  activity: z.string().min(1).max(500),
+  leadName: z.string().min(1).max(140),
+  companyOrHandle: z.string().max(140).default(''),
+  sourceChannel: z.string().min(1).max(80),
+  sourcePostDay: z.number().int().min(0).max(30).default(0),
+  interestSummary: z.string().max(500).default(''),
+  stage: z.enum(['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost']),
 });
 
 const DispatchRemindersSchema = z.object({
@@ -178,8 +218,42 @@ const schedulerInterval = setInterval(() => {
 }, 15 * 60 * 1000);
 schedulerInterval.unref();
 
+function extractForwardedForIp(forwardedHeader: string): string | null {
+  const entries = forwardedHeader
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const match = entries[i].match(/(?:^|;)\s*for=("[^"]+"|[^;,\s]+)/i);
+    if (!match?.[1]) continue;
+    let raw = match[1].replace(/^"|"$/g, '').trim();
+    if (raw.startsWith('[')) {
+      const endBracket = raw.indexOf(']');
+      if (endBracket !== -1) raw = raw.slice(1, endBracket);
+    } else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(raw)) {
+      raw = raw.slice(0, raw.lastIndexOf(':'));
+    }
+    if (isIP(raw)) return raw;
+  }
+  return null;
+}
+
+function getClientIpKey(req: Request): string {
+  const clientIp =
+    (req.ip && req.ip !== req.socket.remoteAddress ? req.ip : null) ||
+    (typeof req.headers.forwarded === 'string'
+      ? extractForwardedForIp(req.headers.forwarded)
+      : null) ||
+    req.ip ||
+    req.socket.remoteAddress ||
+    '127.0.0.1';
+  return ipKeyGenerator(clientIp);
+}
+
 async function startServer() {
   const app = express();
+  // Trust the single immediate reverse proxy hop (Cloud Run / Render load balancer)
+  app.set('trust proxy', 1);
   const PORT = 3000;
 
   // Security headers
@@ -188,6 +262,24 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-XSS-Protection', '0');
     next();
+  });
+
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: getClientIpKey,
+    message: { error: 'Too many requests. Please slow down and try again shortly.' },
+  });
+
+  const aiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: getClientIpKey,
+    message: { error: 'AI generation rate limit reached. Please wait a minute before retrying.' },
   });
 
   // Stripe webhook requires raw request body BEFORE express.json()
@@ -221,23 +313,63 @@ async function startServer() {
     }
   );
 
+  app.post(
+    '/api/audio/transcribe',
+    express.json({ limit: '16mb' }),
+    requireAuth,
+    aiLimiter,
+    async (req: AuthRequest, res) => {
+      const parsed = TranscribeAudioSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid audio transcription payload.' });
+      }
+
+      const ai = getGeminiClient();
+      if (!ai) {
+        return res.status(503).json({
+          error: 'Gemini API key is not configured on the server.',
+        });
+      }
+
+      const { audioBase64, mimeType, promptHint } = parsed.data;
+      const cleanBase64 = audioBase64.replace(/^data:[^;]+;base64,/, '').trim();
+      const promptText = promptHint?.trim()
+        ? `Transcribe this audio accurately. Context: ${promptHint.trim()}. Return only the spoken transcript.`
+        : 'Transcribe this audio accurately. Return only the clean spoken transcript.';
+
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.5-transcribe',
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType === 'audio/mp3' ? 'audio/mpeg' : mimeType,
+                  data: cleanBase64,
+                },
+              },
+              { text: promptText },
+            ],
+          },
+        });
+
+        return res.json({
+          transcript: (response.text || '').trim(),
+          model: 'gemini-3.5-transcribe',
+        });
+      } catch (error) {
+        console.error('Gemini audio transcription error:', error);
+        return res.status(502).json({
+          error:
+            error instanceof Error
+              ? `Transcription failed: ${error.message}`
+              : 'Audio transcription failed.',
+        });
+      }
+    }
+  );
+
   app.use(express.json({ limit: '1mb' }));
-
-  const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests. Please slow down and try again shortly.' },
-  });
-
-  const aiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 15,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'AI generation rate limit reached. Please wait a minute before retrying.' },
-  });
 
   app.use('/api', apiLimiter);
 
@@ -440,7 +572,7 @@ ${categorySpecText}`;
     }
   });
 
-  // Busi Rx AI Assistant
+  // Busi Rx AI Assistant (multi-turn Gemini chatbot with role system instructions & model selector)
   app.post('/api/assistant/chat', requireAuth, aiLimiter, async (req: AuthRequest, res) => {
     const parsed = AssistantChatSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -454,9 +586,25 @@ ${categorySpecText}`;
       });
     }
 
-    const { message, history, businessContext } = parsed.data;
+    const { message, history, businessContext, rolePreset, modelTier } = parsed.data;
+    const roleGuidanceMap: Record<typeof rolePreset, string> = {
+      advisor:
+        'Act as the primary Busi Rx Business Advisor: balance compliance priorities, cash flow discipline, and weekly execution steps.',
+      compliance:
+        'Act as a strict Compliance & Licensing Reviewer: prioritize legal entity hygiene, tax reserves, permits, insurance coverage, and explicitly flag statutory rules requiring local verification.',
+      marketing:
+        'Act as a Customer Acquisition & Lead Coach: help convert the 30-day social media calendar and Lead CRM stages into booked customers with ethical, high-trust outreach.',
+      operations:
+        'Act as an Operations & Team Manager: streamline SOPs, employee/contractor onboarding, certification expirations, and recurring task workflows.',
+    };
+
+    const selectedModel =
+      modelTier === 'fast' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
+    const thinkingLevel =
+      modelTier === 'fast' ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW;
+
     const systemInstruction = `You are the friendly Busi Rx AI Assistant ("The Prescription for a Healthier Business").
-You help small-business owners understand their operating blueprint, compliance tasks, upcoming renewals, and growth priorities.
+${roleGuidanceMap[rolePreset]}
 Business context:
 - Name: ${businessContext.name}
 - Industry: ${businessContext.industry}
@@ -471,22 +619,25 @@ Rules:
 - Remind the owner when an action requires their explicit approval (payments, tax/legal filings, external communications).`;
 
     try {
-      const conversationText = [
-        ...history.map((m) => `${m.role === 'user' ? 'Owner' : 'Busi Rx'}: ${m.content}`),
-        `Owner: ${message}`,
-      ].join('\n\n');
+      const chatHistory = history.map((m) => ({
+        role: m.role === 'user' ? ('user' as const) : ('model' as const),
+        parts: [{ text: m.content }],
+      }));
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: conversationText,
+      const chat = ai.chats.create({
+        model: selectedModel,
+        history: chatHistory,
         config: {
           systemInstruction,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          thinkingConfig: { thinkingLevel },
         },
       });
 
+      const response = await chat.sendMessage({ message });
+
       return res.json({
         reply: response.text || 'I could not generate a response right now. Please try again.',
+        modelUsed: selectedModel,
       });
     } catch (error) {
       console.error('Gemini assistant chat error:', error);
@@ -641,6 +792,63 @@ Main Goals: ${focusGoal || assessment.goals.join(', ') || 'Consistent inbound cu
             error instanceof Error
               ? `Social calendar generation failed: ${error.message}`
               : 'Social calendar generation failed.',
+        });
+      }
+    }
+  );
+
+  // Personalized Lead Follow-Up Draft (requires explicit owner review & approval before sending)
+  app.post(
+    '/api/marketing/draft-lead-followup',
+    requireAuth,
+    aiLimiter,
+    async (req: AuthRequest, res) => {
+      const parsed = DraftLeadFollowUpSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid lead follow-up request.' });
+      }
+
+      const ai = getGeminiClient();
+      if (!ai) {
+        return res.status(503).json({
+          error: 'Gemini API key is not configured on the server.',
+        });
+      }
+
+      const d = parsed.data;
+      const systemInstruction = `You are Busi Rx's customer follow-up assistant.
+Draft one short, warm, zero-pressure follow-up message that the business owner can review, approve, and copy/send to a prospective lead.
+Rules:
+- Keep it under 110 words, polite, specific to their stated interest, and ending with one easy question.
+- Never invent discounts, testimonials, or promises the owner did not authorize.`;
+
+      const prompt = `Business: ${d.businessName} (${d.industry} — ${d.activity})
+Lead Name: ${d.leadName}${d.companyOrHandle ? ` (${d.companyOrHandle})` : ''}
+Source: ${d.sourceChannel}${d.sourcePostDay > 0 ? ` (Social Calendar Day ${d.sourcePostDay})` : ''}
+Current Pipeline Stage: ${d.stage}
+Lead Inquiry / Interest: ${d.interestSummary || 'Interested in learning more about our offerings'}`;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: prompt,
+          config: {
+            systemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+        return res.json({
+          draft:
+            (response.text || '').trim() ||
+            `Hi ${d.leadName}, thanks for reaching out via ${d.sourceChannel}! Would you like a quick overview of how ${d.businessName} can help?`,
+        });
+      } catch (error) {
+        console.error('Gemini lead follow-up draft error:', error);
+        return res.status(502).json({
+          error:
+            error instanceof Error
+              ? `Follow-up draft failed: ${error.message}`
+              : 'Follow-up draft failed.',
         });
       }
     }
@@ -842,7 +1050,191 @@ Main Goals: ${focusGoal || assessment.goals.join(', ') || 'Consistent inbound cu
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  const liveWss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', async (req, socket, head) => {
+    try {
+      const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (reqUrl.pathname !== '/api/live-voice') {
+        return;
+      }
+
+      const token = reqUrl.searchParams.get('token') || '';
+      if (!token) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      const decoded = await adminAuth.verifyIdToken(token);
+      if (!decoded.email_verified) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      liveWss.handleUpgrade(req, socket, head, (ws) => {
+        liveWss.emit('connection', ws, reqUrl);
+      });
+    } catch (err) {
+      console.error('WebSocket live voice auth failed:', err);
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+    }
+  });
+
+  liveWss.on('connection', async (clientWs: WebSocket, reqUrl: URL) => {
+    const ai = getGeminiClient();
+    if (!ai) {
+      clientWs.send(
+        JSON.stringify({
+          type: 'error',
+          error: 'Gemini API key is not configured on the server.',
+        })
+      );
+      clientWs.close();
+      return;
+    }
+
+    const allowedVoices = new Set(['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr']);
+    const voiceParam = reqUrl.searchParams.get('voice') || 'Zephyr';
+    const voiceName = allowedVoices.has(voiceParam) ? voiceParam : 'Zephyr';
+    const businessName = (reqUrl.searchParams.get('business') || 'your business').slice(0, 120);
+    const industry = (reqUrl.searchParams.get('industry') || 'small business').slice(0, 100);
+    const role = (reqUrl.searchParams.get('role') || 'advisor').slice(0, 40);
+
+    const roleHint =
+      role === 'sales'
+        ? 'Focus on practicing sales calls, handling buyer objections, and turning generated leads into paying customers.'
+        : role === 'operations'
+        ? 'Focus on weekly operations, renewals, tax/compliance prep, and prioritizing open tasks.'
+        : 'Act as a warm, practical Busi Rx business advisor helping the owner plan their next steps clearly.';
+
+    let closed = false;
+    const sessionPromise = ai.live
+      .connect({
+        model: 'gemini-3.8-live',
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: `You are Busi Rx's real-time voice advisor speaking with the owner of "${businessName}" (${industry}). ${roleHint} Keep spoken answers concise, conversational, and practical. Never invent statutory government deadlines.`,
+        },
+        callbacks: {
+          onopen: () => {
+            if (!closed && clientWs.readyState === clientWs.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'ready', model: 'gemini-3.8-live' }));
+            }
+          },
+          onmessage: (message: LiveServerMessage) => {
+            if (closed || clientWs.readyState !== clientWs.OPEN) return;
+            const content = message.serverContent;
+            if (content?.inputTranscription?.text) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'inputTranscript',
+                  text: content.inputTranscription.text,
+                })
+              );
+            }
+            if (content?.outputTranscription?.text) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'outputTranscript',
+                  text: content.outputTranscription.text,
+                })
+              );
+            }
+            for (const part of content?.modelTurn?.parts ?? []) {
+              if (part.inlineData?.data) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: 'audio',
+                    data: part.inlineData.data,
+                  })
+                );
+              }
+            }
+            if (content?.interrupted) {
+              clientWs.send(JSON.stringify({ type: 'interrupted' }));
+            }
+            if (content?.turnComplete) {
+              clientWs.send(JSON.stringify({ type: 'turnComplete' }));
+            }
+          },
+          onerror: (err: unknown) => {
+            if (!closed && clientWs.readyState === clientWs.OPEN) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'error',
+                  error:
+                    err instanceof Error ? err.message : 'Live voice session encountered an error.',
+                })
+              );
+            }
+          },
+          onclose: () => {
+            if (!closed && clientWs.readyState === clientWs.OPEN) {
+              clientWs.close();
+            }
+          },
+        },
+      })
+      .catch((err: unknown) => {
+        console.error('Gemini Live connect failed:', err);
+        if (!closed && clientWs.readyState === clientWs.OPEN) {
+          clientWs.send(
+            JSON.stringify({
+              type: 'error',
+              error:
+                err instanceof Error ? err.message : 'Unable to start Gemini Live voice session.',
+            })
+          );
+          clientWs.close();
+        }
+        return null;
+      });
+
+    clientWs.on('message', (raw) => {
+      let msg: { audio?: string; text?: string };
+      try {
+        msg = JSON.parse(raw.toString()) as { audio?: string; text?: string };
+      } catch {
+        return;
+      }
+
+      sessionPromise.then((session) => {
+        if (!session || closed) return;
+        if (typeof msg.audio === 'string' && msg.audio.length > 0) {
+          session.sendRealtimeInput({
+            audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
+          });
+        } else if (typeof msg.text === 'string' && msg.text.trim()) {
+          session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: msg.text.trim() }] }],
+            turnComplete: true,
+          });
+        }
+      });
+    });
+
+    clientWs.on('close', () => {
+      closed = true;
+      sessionPromise.then((session) => {
+        try {
+          session?.close();
+        } catch {
+          // Ignore close errors
+        }
+      });
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Busi Rx server running on http://0.0.0.0:${PORT}`);
   });
 }

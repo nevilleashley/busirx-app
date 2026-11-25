@@ -35,6 +35,8 @@ import type {
   DocCategory,
   DocumentRecord,
   FinancialEntryRecord,
+  LeadRecord,
+  LeadStage,
   MarketingCampaignRecord,
   NotificationLogRecord,
   ObligationRecord,
@@ -1008,12 +1010,186 @@ export async function approveAndMarkSocialDayPublished(params: {
   }
 }
 
+export async function createLeadRecord(params: {
+  businessId: string;
+  ownerUid: string;
+  actorEmail: string;
+  fullName: string;
+  companyOrHandle: string;
+  email: string;
+  phone: string;
+  sourceChannel: string;
+  sourcePostDay: number;
+  interestSummary: string;
+  estimatedValueCents: number;
+  nextFollowUpDate: string;
+  lastContactNote: string;
+}): Promise<string> {
+  const id = newDocId('lead');
+  const path = `businesses/${params.businessId}/leads/${id}`;
+  const cleanPostDay = Math.max(0, Math.min(30, Math.round(params.sourcePostDay || 0)));
+  try {
+    await setDoc(doc(db, 'businesses', params.businessId, 'leads', id), {
+      id,
+      businessId: params.businessId,
+      ownerUid: params.ownerUid,
+      fullName: params.fullName.trim().slice(0, 140),
+      companyOrHandle: params.companyOrHandle.trim().slice(0, 140),
+      email: params.email.trim().slice(0, 254),
+      phone: params.phone.trim().slice(0, 40),
+      sourceChannel: (params.sourceChannel || 'Social Media').trim().slice(0, 80),
+      sourcePostDay: cleanPostDay,
+      interestSummary: params.interestSummary.trim().slice(0, 500),
+      estimatedValueCents: Math.max(0, Math.min(1000000000, Math.round(params.estimatedValueCents || 0))),
+      stage: 'new',
+      nextFollowUpDate: params.nextFollowUpDate.trim().slice(0, 30),
+      lastContactNote: params.lastContactNote.trim().slice(0, 1000),
+      requiresOutreachApproval: true,
+      approvedForOutreach: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await appendAuditLog({
+      businessId: params.businessId,
+      ownerUid: params.ownerUid,
+      actorEmail: params.actorEmail,
+      action: 'lead_captured',
+      entityType: 'lead',
+      entityId: id,
+      summary: `Captured lead "${params.fullName}" from ${params.sourceChannel}${
+        cleanPostDay > 0 ? ` (Calendar Day ${cleanPostDay})` : ''
+      }.`,
+    });
+    return id;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export async function updateLeadStageAndOutreach(params: {
+  businessId: string;
+  ownerUid: string;
+  actorEmail: string;
+  lead: LeadRecord;
+  stage: LeadStage;
+  approvedForOutreach?: boolean;
+  nextFollowUpDate?: string;
+  lastContactNote?: string;
+}): Promise<void> {
+  const path = `businesses/${params.businessId}/leads/${params.lead.id}`;
+  const nextApproved =
+    typeof params.approvedForOutreach === 'boolean'
+      ? params.approvedForOutreach
+      : params.stage === 'proposal_sent'
+      ? true
+      : params.lead.approvedForOutreach;
+  try {
+    await updateDoc(doc(db, 'businesses', params.businessId, 'leads', params.lead.id), {
+      stage: params.stage,
+      approvedForOutreach: nextApproved,
+      nextFollowUpDate: (params.nextFollowUpDate ?? params.lead.nextFollowUpDate).slice(0, 30),
+      lastContactNote: (params.lastContactNote ?? params.lead.lastContactNote).slice(0, 1000),
+      updatedAt: serverTimestamp(),
+    });
+    if (params.stage !== params.lead.stage || (nextApproved && !params.lead.approvedForOutreach)) {
+      await appendAuditLog({
+        businessId: params.businessId,
+        ownerUid: params.ownerUid,
+        actorEmail: params.actorEmail,
+        action: 'lead_stage_updated',
+        entityType: 'lead',
+        entityId: params.lead.id,
+        summary: `Updated lead "${params.lead.fullName}" to stage "${params.stage}"${
+          nextApproved ? ' (outreach approved)' : ''
+        }.`,
+      });
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateLeadDetails(params: {
+  businessId: string;
+  ownerUid: string;
+  actorEmail: string;
+  lead: LeadRecord;
+  updates: {
+    fullName: string;
+    companyOrHandle: string;
+    email: string;
+    phone: string;
+    sourceChannel: string;
+    sourcePostDay: number;
+    interestSummary: string;
+    estimatedValueCents: number;
+    stage: LeadStage;
+    nextFollowUpDate: string;
+    lastContactNote: string;
+    approvedForOutreach: boolean;
+  };
+}): Promise<void> {
+  const path = `businesses/${params.businessId}/leads/${params.lead.id}`;
+  const cleanName = params.updates.fullName.trim().slice(0, 140) || params.lead.fullName || 'Lead';
+  const cleanChannel =
+    params.updates.sourceChannel.trim().slice(0, 80) || params.lead.sourceChannel || 'Direct Outreach';
+  const cleanPostDay = Math.max(0, Math.min(30, Math.round(params.updates.sourcePostDay || 0)));
+  const cleanValue = Math.max(
+    0,
+    Math.min(1000000000, Math.round(params.updates.estimatedValueCents || 0))
+  );
+  const requiresApproval = params.lead.requiresOutreachApproval ?? true;
+  const approvedForOutreach =
+    params.updates.stage === 'proposal_sent' ? true : Boolean(params.updates.approvedForOutreach);
+
+  try {
+    await updateDoc(doc(db, 'businesses', params.businessId, 'leads', params.lead.id), {
+      fullName: cleanName,
+      companyOrHandle: params.updates.companyOrHandle.trim().slice(0, 140),
+      email: params.updates.email.trim().slice(0, 254),
+      phone: params.updates.phone.trim().slice(0, 40),
+      sourceChannel: cleanChannel,
+      sourcePostDay: cleanPostDay,
+      interestSummary: params.updates.interestSummary.trim().slice(0, 500),
+      estimatedValueCents: cleanValue,
+      stage: params.updates.stage,
+      nextFollowUpDate: params.updates.nextFollowUpDate.trim().slice(0, 30),
+      lastContactNote: params.updates.lastContactNote.trim().slice(0, 1000),
+      requiresOutreachApproval: requiresApproval,
+      approvedForOutreach,
+      updatedAt: serverTimestamp(),
+    });
+
+    await appendAuditLog({
+      businessId: params.businessId,
+      ownerUid: params.ownerUid,
+      actorEmail: params.actorEmail,
+      action: 'lead_details_updated',
+      entityType: 'lead',
+      entityId: params.lead.id,
+      summary: `Updated lead "${cleanName}" (stage: ${params.updates.stage}).`,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteLeadRecord(businessId: string, leadId: string): Promise<void> {
+  const path = `businesses/${businessId}/leads/${leadId}`;
+  try {
+    await deleteDoc(doc(db, 'businesses', businessId, 'leads', leadId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function runReminderCheckAndLog(params: {
   business: BusinessRecord;
   userProfile: UserProfile;
   tasks: TaskItem[];
   obligations: ObligationRecord[];
   teamMembers: TeamMemberRecord[];
+  leads?: LeadRecord[];
   existingNotifications: NotificationLogRecord[];
 }): Promise<{ createdCount: number; duplicatesSkipped: number }> {
   const existingKeys = new Set(params.existingNotifications.map((n) => n.dedupeKey));
@@ -1080,6 +1256,24 @@ export async function runReminderCheckAndLog(params: {
           title: `Certification expiring: ${m.fullName}`,
           message: `${m.certificationName || 'Team certification'} expires on ${m.certificationExpiry}.`,
           dueDate: m.certificationExpiry,
+        });
+      }
+    }
+  }
+
+  for (const l of params.leads || []) {
+    if (l.stage === 'won' || l.stage === 'lost' || !l.nextFollowUpDate) continue;
+    const diff = daysUntilDate(l.nextFollowUpDate);
+    if (diff !== null && diff <= leadDays) {
+      const dedupeKey = buildReminderDedupeKey('lead', l.id, l.nextFollowUpDate, 'in_app');
+      if (!existingKeys.has(dedupeKey)) {
+        candidateReminders.push({
+          dedupeKey,
+          relatedEntityType: 'lead',
+          relatedEntityId: l.id,
+          title: diff < 0 ? `Overdue lead follow-up: ${l.fullName}` : `Lead follow-up due in ${diff}d: ${l.fullName}`,
+          message: `Source: ${l.sourceChannel}. Stage: ${l.stage}. Follow up on ${l.nextFollowUpDate}.`,
+          dueDate: l.nextFollowUpDate,
         });
       }
     }
@@ -1192,7 +1386,8 @@ export function subscribeBusinessSubcollection<T>(
     | 'notifications'
     | 'auditLogs'
     | 'marketingCampaigns'
-    | 'socialCalendarDays',
+    | 'socialCalendarDays'
+    | 'leads',
   onData: (rows: T[]) => void,
   onError: (err: Error) => void
 ): Unsubscribe {
@@ -1232,6 +1427,7 @@ export async function exportBusinessDataJson(
     'auditLogs',
     'marketingCampaigns',
     'socialCalendarDays',
+    'leads',
   ] as const;
 
   try {
@@ -1278,6 +1474,7 @@ export async function deleteBusinessAndAllData(uid: string, businessId: string):
     'auditLogs',
     'marketingCampaigns',
     'socialCalendarDays',
+    'leads',
   ] as const;
 
   try {

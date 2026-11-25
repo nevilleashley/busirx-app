@@ -1,6 +1,6 @@
 {
   "name": "Busi Rx",
   "description": "The Prescription for a Healthier Business. AI-powered business operating blueprints, compliance tracking, recurring workflows, and operational management.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

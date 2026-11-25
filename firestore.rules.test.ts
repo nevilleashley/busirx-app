@@ -31,11 +31,12 @@ describe('Firestore Security Rules & Blueprint Parity (Dirty Dozen Guards)', () 
       'match /auditLogs/{logId}',
       'match /marketingCampaigns/{campaignId}',
       'match /socialCalendarDays/{dayId}',
+      'match /leads/{leadId}',
     ];
     for (const p of expectedPaths) {
       expect(rulesText).toContain(p);
     }
-    expect(Object.keys(blueprint.firestore)).toHaveLength(12);
+    expect(Object.keys(blueprint.firestore)).toHaveLength(13);
   });
 
   it('enforces PII isolation (no blanket list on /users)', () => {
@@ -48,11 +49,14 @@ describe('Firestore Security Rules & Blueprint Parity (Dirty Dozen Guards)', () 
     expect(rulesText).toContain('allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;');
   });
 
-  it('enforces immutable auditLogs and consequential approval gate on tasks', () => {
+  it('enforces immutable auditLogs and consequential approval gates', () => {
     const auditBlock = rulesText.split('match /auditLogs/{logId}')[1].split('match /marketingCampaigns/{campaignId}')[0];
     expect(auditBlock).toContain('allow update: if false;');
     expect(rulesText).toContain(
       "(!(data.requiresExplicitApproval && data.status == 'completed') || data.explicitlyApproved == true)"
+    );
+    expect(rulesText).toContain(
+      "(!(data.requiresOutreachApproval && data.stage == 'proposal_sent') || data.approvedForOutreach == true)"
     );
   });
 });

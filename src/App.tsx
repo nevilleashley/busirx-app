@@ -13,13 +13,17 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  Mic,
   Plus,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType, testFirestoreConnection } from './lib/firebase.ts';
+import { buildStarterSocialCalendarDays } from './lib/socialPlaybook.ts';
 import {
   createStripeCheckoutApi,
+  draftLeadFollowUpApi,
   fetchSystemReadiness,
   generateBlueprintApi,
   generateSocialCalendarApi,
@@ -36,11 +40,13 @@ import {
   approveConsequentialTask,
   completeOrAdvanceTask,
   createFinancialEntry,
+  createLeadRecord,
   createManualTask,
   createMarketingCampaign,
   createObligation,
   createTeamMember,
   deleteBusinessAndAllData,
+  deleteLeadRecord,
   deleteTask,
   dismissBlueprintItem,
   ensureUserProfile,
@@ -53,6 +59,8 @@ import {
   subscribeBusinessSubcollection,
   subscribeUserBusinesses,
   toggleSocialCalendarMiniTask,
+  updateLeadDetails,
+  updateLeadStageAndOutreach,
   updateSocialCalendarDayDraft,
   updateTaskAssignee,
   updateUserNotificationPreferences,
@@ -67,6 +75,7 @@ import type {
   BusinessRecord,
   DocumentRecord,
   FinancialEntryRecord,
+  LeadRecord,
   MarketingCampaignRecord,
   NotificationLogRecord,
   ObligationRecord,
@@ -85,6 +94,8 @@ import { ObligationsDocumentsView } from './components/ObligationsDocumentsView.
 import { TeamFinanceGrowthView } from './components/TeamFinanceGrowthView.tsx';
 import { BillingSecurityView } from './components/BillingSecurityView.tsx';
 import { SocialCalendarView } from './components/SocialCalendarView.tsx';
+import { LeadCRM } from './components/LeadCRM.tsx';
+import { VoiceStudioView } from './components/VoiceStudioView.tsx';
 import { AssistantDrawer } from './components/AssistantDrawer.tsx';
 import { DashboardOverview, type WorkspaceNavSection } from './components/DashboardOverview.tsx';
 
@@ -112,6 +123,11 @@ function WorkspaceApp() {
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [campaigns, setCampaigns] = useState<MarketingCampaignRecord[]>([]);
   const [socialDays, setSocialDays] = useState<SocialCalendarDay[]>([]);
+  const [leads, setLeads] = useState<LeadRecord[]>([]);
+  const [preselectedLeadDay, setPreselectedLeadDay] = useState<{
+    dayNumber: number;
+    platform: string;
+  } | null>(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
@@ -226,6 +242,7 @@ function WorkspaceApp() {
       setAuditLogs([]);
       setCampaigns([]);
       setSocialDays([]);
+      setLeads([]);
       return;
     }
 
@@ -243,6 +260,7 @@ function WorkspaceApp() {
       subscribeBusinessSubcollection<AuditLogRecord>(activeBusinessId, uid, 'auditLogs', setAuditLogs, onErr),
       subscribeBusinessSubcollection<MarketingCampaignRecord>(activeBusinessId, uid, 'marketingCampaigns', setCampaigns, onErr),
       subscribeBusinessSubcollection<SocialCalendarDay>(activeBusinessId, uid, 'socialCalendarDays', setSocialDays, onErr),
+      subscribeBusinessSubcollection<LeadRecord>(activeBusinessId, uid, 'leads', setLeads, onErr),
     ];
 
     return () => {
@@ -296,6 +314,20 @@ function WorkspaceApp() {
         replaceCategoryIds: affectedCategories,
       });
 
+      if (!isUpdatingExisting) {
+        try {
+          const starter = buildStarterSocialCalendarDays(assessment);
+          await saveGeneratedSocialCalendar({
+            businessId,
+            ownerUid: firebaseUser.uid,
+            actorEmail: firebaseUser.email || '',
+            generated: starter,
+          });
+        } catch {
+          // SocialCalendarView will also populate automatically on first open if needed
+        }
+      }
+
       setActiveBusinessId(businessId);
       setCreatingNewBusiness(false);
       setActiveSection('blueprint');
@@ -348,6 +380,7 @@ function WorkspaceApp() {
   const pendingBlueprintCount = blueprintItems.filter(
     (b) => b.completionStatus === 'pending_approval'
   ).length;
+  const newLeadsCount = leads.filter((l) => l.stage === 'new').length;
 
   const navItems: Array<{
     id: WorkspaceNavSection;
@@ -361,6 +394,8 @@ function WorkspaceApp() {
     { id: 'obligations', label: 'Bills, Licenses & Vault', icon: FolderLock },
     { id: 'operations', label: 'Team, Finance & Growth', icon: Users },
     { id: 'social_calendar', label: '30-Day Social Calendar', icon: CalendarDays },
+    { id: 'leads', label: 'Lead CRM', icon: UserPlus, count: newLeadsCount },
+    { id: 'voice_studio', label: 'Voice & Audio', icon: Mic },
     { id: 'assessment', label: 'Update Assessment', icon: FileSpreadsheet },
     { id: 'billing', label: 'Billing & Security', icon: CreditCard },
   ];
@@ -529,7 +564,11 @@ function WorkspaceApp() {
           )}
         </header>
 
-        <main className="flex-1 p-6 lg:p-8 max-w-6xl w-full mx-auto space-y-6">
+        <main
+          className={`flex-1 p-6 lg:p-8 w-full mx-auto space-y-6 ${
+            activeSection === 'leads' ? 'max-w-7xl' : 'max-w-6xl'
+          }`}
+        >
           {globalError && (
             <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between">
               <span className="break-words">{globalError}</span>
@@ -561,6 +600,7 @@ function WorkspaceApp() {
               obligations={obligations}
               notifications={notifications}
               socialDays={socialDays}
+              leads={leads}
               onNavigate={setActiveSection}
               onMarkNotificationRead={(id) => markNotificationRead(activeBusiness.id, id)}
             />
@@ -629,6 +669,7 @@ function WorkspaceApp() {
                   tasks,
                   obligations,
                   teamMembers,
+                  leads,
                   existingNotifications: notifications,
                 })
               }
@@ -694,13 +735,30 @@ function WorkspaceApp() {
               }
               onApproveCampaign={(id) => approveAndActivateCampaign(activeBusiness.id, id)}
               onOpenSocialCalendar={() => setActiveSection('social_calendar')}
+              onOpenLeads={() => setActiveSection('leads')}
             />
           ) : activeSection === 'social_calendar' ? (
             <SocialCalendarView
+              businessId={activeBusiness.id}
               businessName={activeBusiness.name}
               days={socialDays}
+              leads={leads}
               isGenerating={isGeneratingSocial}
               errorMessage={socialError}
+              onSeedStarterCalendar={async ({ startDate, focusGoal }) => {
+                setSocialError('');
+                const starter = buildStarterSocialCalendarDays(
+                  activeBusiness,
+                  startDate,
+                  focusGoal
+                );
+                await saveGeneratedSocialCalendar({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  generated: starter,
+                });
+              }}
               onGenerateCalendar={async ({ startDate, focusGoal }) => {
                 setSocialError('');
                 setIsGeneratingSocial(true);
@@ -749,6 +807,112 @@ function WorkspaceApp() {
                   targetStatus,
                 })
               }
+              onLogLeadFromDay={(day) => {
+                setPreselectedLeadDay({
+                  dayNumber: day.dayNumber,
+                  platform: day.platform,
+                });
+                setActiveSection('leads');
+              }}
+            />
+          ) : activeSection === 'leads' ? (
+            <LeadCRM
+              businessName={activeBusiness.name}
+              leads={leads}
+              preselectedDay={preselectedLeadDay}
+              onClearPreselectedDay={() => setPreselectedLeadDay(null)}
+              onCreateLead={(input) =>
+                createLeadRecord({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  ...input,
+                })
+              }
+              onUpdateLeadStage={(lead, nextStage) =>
+                updateLeadStageAndOutreach({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  lead,
+                  stage: nextStage,
+                })
+              }
+              onUpdateLeadDetails={(lead, updates) =>
+                updateLeadDetails({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  lead,
+                  updates,
+                })
+              }
+              onDeleteLead={(leadId) => deleteLeadRecord(activeBusiness.id, leadId)}
+              onDraftFollowUp={async (lead) => {
+                const resp = await draftLeadFollowUpApi({
+                  businessName: activeBusiness.name,
+                  industry: activeBusiness.industry,
+                  activity: activeBusiness.activity,
+                  leadName: lead.fullName,
+                  companyOrHandle: lead.companyOrHandle,
+                  sourceChannel: lead.sourceChannel,
+                  sourcePostDay: lead.sourcePostDay,
+                  interestSummary: lead.interestSummary,
+                  stage: lead.stage,
+                });
+                return resp.draft;
+              }}
+            />
+          ) : activeSection === 'voice_studio' ? (
+            <VoiceStudioView
+              business={activeBusiness}
+              leads={leads}
+              onCreateTaskFromTranscript={async ({ title, description }) => {
+                const due = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+                  .toISOString()
+                  .slice(0, 10);
+                await createManualTask({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  title,
+                  description,
+                  categoryId: 'daily_operations',
+                  priority: 'medium',
+                  taskType: 'one_time',
+                  recurrenceIntervalDays: 0,
+                  dueDate: due,
+                  assignee: 'Business Owner',
+                  requiresExplicitApproval: false,
+                  consequentialActionType: 'none',
+                });
+                await appendAuditLog({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  action: 'task_created_from_transcript',
+                  entityType: 'task',
+                  entityId: activeBusiness.id,
+                  summary: `Created task "${title}" from transcribed audio memo.`,
+                });
+              }}
+              onAppendToLeadNote={async (lead, transcriptText) => {
+                const stamp = new Date().toISOString().slice(0, 10);
+                const combinedNote = [
+                  lead.lastContactNote?.trim(),
+                  `[Audio Transcript ${stamp}]: ${transcriptText}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n\n')
+                  .slice(0, 1000);
+                await updateLeadStageAndOutreach({
+                  businessId: activeBusiness.id,
+                  ownerUid: firebaseUser.uid,
+                  actorEmail: firebaseUser.email || '',
+                  lead,
+                  stage: lead.stage,
+                  lastContactNote: combinedNote,
+                });
+              }}
             />
           ) : userProfile ? (
             <BillingSecurityView

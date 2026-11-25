@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   Check,
@@ -8,15 +8,19 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  UserPlus,
 } from 'lucide-react';
 import { formatIsoDate } from '../lib/domain.ts';
-import type { SocialCalendarDay } from '../types/busirx.ts';
+import type { LeadRecord, SocialCalendarDay } from '../types/busirx.ts';
 
 interface SocialCalendarViewProps {
+  businessId: string;
   businessName: string;
   days: SocialCalendarDay[];
+  leads?: LeadRecord[];
   isGenerating: boolean;
   errorMessage: string;
+  onSeedStarterCalendar: (params: { startDate: string; focusGoal: string }) => Promise<void>;
   onGenerateCalendar: (params: { startDate: string; focusGoal: string }) => Promise<void>;
   onToggleMiniTask: (day: SocialCalendarDay, taskText: string) => Promise<void>;
   onSaveDraftEdits: (params: {
@@ -30,17 +34,22 @@ interface SocialCalendarViewProps {
     day: SocialCalendarDay,
     targetStatus: 'ready' | 'published'
   ) => Promise<void>;
+  onLogLeadFromDay?: (day: SocialCalendarDay) => void;
 }
 
 export function SocialCalendarView({
+  businessId,
   businessName,
   days,
+  leads = [],
   isGenerating,
   errorMessage,
+  onSeedStarterCalendar,
   onGenerateCalendar,
   onToggleMiniTask,
   onSaveDraftEdits,
   onApproveAndSetStatus,
+  onLogLeadFromDay,
 }: SocialCalendarViewProps) {
   const sortedDays = useMemo(
     () => [...days].sort((a, b) => a.dayNumber - b.dayNumber),
@@ -53,6 +62,8 @@ export function SocialCalendarView({
 
   const [startDate, setStartDate] = useState(formatIsoDate(new Date()));
   const [focusGoal, setFocusGoal] = useState('');
+  const [seedingStarter, setSeedingStarter] = useState(false);
+  const autoSeededBizRef = useRef<Set<string>>(new Set());
 
   // Local editable draft fields synced to the selected day
   const [draftHook, setDraftHook] = useState('');
@@ -62,6 +73,27 @@ export function SocialCalendarView({
   const [savingDraft, setSavingDraft] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState('');
+
+  // Auto-populate the 30-day ready-to-use post playbook on first visit if none exist yet
+  useEffect(() => {
+    if (days.length > 0 || isGenerating || seedingStarter) return;
+    if (autoSeededBizRef.current.has(businessId)) return;
+    autoSeededBizRef.current.add(businessId);
+    setSeedingStarter(true);
+    onSeedStarterCalendar({ startDate, focusGoal })
+      .catch(() => {})
+      .finally(() => setSeedingStarter(false));
+  }, [businessId, days.length, isGenerating, seedingStarter, onSeedStarterCalendar, startDate, focusGoal]);
+
+  const leadsByDay = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const l of leads) {
+      if (l.sourcePostDay > 0) {
+        map.set(l.sourcePostDay, (map.get(l.sourcePostDay) || 0) + 1);
+      }
+    }
+    return map;
+  }, [leads]);
 
   const platforms = useMemo(() => {
     return Array.from(new Set(sortedDays.map((d) => d.platform).filter(Boolean)));
@@ -180,27 +212,27 @@ export function SocialCalendarView({
               className="w-full px-3 py-2 text-xs border border-[#E6E2F0] rounded-lg"
             />
           </div>
-          <div className="md:col-span-4">
+          <div className="md:col-span-4 flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={isGenerating}
+              disabled={isGenerating || seedingStarter}
               onClick={() => onGenerateCalendar({ startDate, focusGoal })}
-              className="w-full py-2.5 px-4 text-xs font-semibold bg-[#4C1D95] text-white rounded-lg hover:bg-[#3B1478] disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap"
+              className="flex-1 py-2.5 px-4 text-xs font-semibold bg-[#4C1D95] text-white rounded-lg hover:bg-[#3B1478] disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap"
             >
               {isGenerating ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Generating 30-Day Calendar...
+                  Generating 30 Days...
                 </>
               ) : sortedDays.length > 0 ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5" />
-                  Regenerate 30-Day Calendar
+                  Tailor 30 Days with Gemini AI
                 </>
               ) : (
                 <>
                   <Sparkles className="w-3.5 h-3.5" />
-                  Generate 30-Day Calendar
+                  Generate 30-Day AI Calendar
                 </>
               )}
             </button>
@@ -223,15 +255,33 @@ export function SocialCalendarView({
       </div>
 
       {sortedDays.length === 0 ? (
-        <div className="bg-white border border-[#E6E2F0] rounded-xl p-12 text-center space-y-3">
+        <div className="bg-white border border-[#E6E2F0] rounded-xl p-12 text-center space-y-4">
           <CalendarDays className="w-8 h-8 text-[#4C1D95] mx-auto" />
           <h4 className="font-display text-base font-semibold text-[#1C1B22]">
-            No 30-day calendar generated yet
+            {seedingStarter
+              ? 'Loading 30 days of ready-to-use post content...'
+              : 'Load your 30-day customer acquisition post playbook'}
           </h4>
           <p className="text-xs text-[#6E6A7C] max-w-md mx-auto leading-relaxed">
-            Click &ldquo;Generate 30-Day Calendar&rdquo; above and Gemini will build 30 tailored
-            posts and daily customer-getting mini-task checklists for {businessName}.
+            Populate 30 ready-to-edit social media posts and daily mini-task checklists for{' '}
+            {businessName}, or generate fresh variations with Gemini AI.
           </p>
+          {!seedingStarter && (
+            <button
+              type="button"
+              onClick={async () => {
+                setSeedingStarter(true);
+                try {
+                  await onSeedStarterCalendar({ startDate, focusGoal });
+                } finally {
+                  setSeedingStarter(false);
+                }
+              }}
+              className="px-4 py-2 text-xs font-semibold bg-[#4C1D95] text-white rounded-lg hover:bg-[#3B1478]"
+            >
+              Load 30-Day Ready-to-Use Posts
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -321,6 +371,11 @@ export function SocialCalendarView({
                     <div className="mt-1 flex items-center justify-between text-xs text-[#6E6A7C]">
                       <span>
                         {day.platform} · {day.contentPillar}
+                        {leadsByDay.get(day.dayNumber)
+                          ? ` · ${leadsByDay.get(day.dayNumber)} lead${
+                              leadsByDay.get(day.dayNumber) === 1 ? '' : 's'
+                            }`
+                          : ''}
                       </span>
                       <span
                         className={`font-mono-tabular ${
@@ -351,11 +406,21 @@ export function SocialCalendarView({
                     </h4>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {onLogLeadFromDay && (
+                      <button
+                        type="button"
+                        onClick={() => onLogLeadFromDay(activeDay)}
+                        className="px-3 py-1.5 text-xs font-medium bg-[#F3EFFC] text-[#4C1D95] rounded-lg hover:bg-[#E8E0FA] flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Log Lead
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleCopyCaption(activeDay)}
-                      className="px-3 py-1.5 text-xs font-medium border border-[#E6E2F0] rounded-lg text-[#1C1B22] hover:bg-[#F8F7FB] flex items-center gap-1.5"
+                      className="px-3 py-1.5 text-xs font-medium border border-[#E6E2F0] rounded-lg text-[#1C1B22] hover:bg-[#F8F7FB] flex items-center gap-1.5 whitespace-nowrap"
                     >
                       {copiedId === activeDay.id ? (
                         <>

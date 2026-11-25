@@ -8,11 +8,13 @@ import {
   ClipboardList,
   FileCheck2,
   ShieldAlert,
+  UserPlus,
 } from 'lucide-react';
-import { BLUEPRINT_CATEGORIES, daysUntilDate } from '../lib/domain.ts';
+import { BLUEPRINT_CATEGORIES, daysUntilDate, formatCurrencyCents } from '../lib/domain.ts';
 import type {
   BlueprintItem,
   BusinessRecord,
+  LeadRecord,
   NotificationLogRecord,
   ObligationRecord,
   SocialCalendarDay,
@@ -26,6 +28,8 @@ export type WorkspaceNavSection =
   | 'obligations'
   | 'operations'
   | 'social_calendar'
+  | 'leads'
+  | 'voice_studio'
   | 'assessment'
   | 'billing';
 
@@ -36,6 +40,7 @@ interface DashboardOverviewProps {
   obligations: ObligationRecord[];
   notifications: NotificationLogRecord[];
   socialDays?: SocialCalendarDay[];
+  leads?: LeadRecord[];
   onNavigate: (section: WorkspaceNavSection) => void;
   onMarkNotificationRead: (notifId: string) => Promise<void>;
 }
@@ -47,6 +52,7 @@ export function DashboardOverview({
   obligations,
   notifications,
   socialDays = [],
+  leads = [],
   onNavigate,
   onMarkNotificationRead,
 }: DashboardOverviewProps) {
@@ -101,6 +107,25 @@ export function DashboardOverview({
       published,
     };
   }, [socialDays]);
+
+  const leadsSummary = useMemo(() => {
+    let activeCount = 0;
+    let openValueCents = 0;
+    let wonCount = 0;
+    for (const l of leads) {
+      if (l.stage === 'won') wonCount += 1;
+      else if (l.stage !== 'lost') {
+        activeCount += 1;
+        openValueCents += l.estimatedValueCents || 0;
+      }
+    }
+    return {
+      total: leads.length,
+      activeCount,
+      openValueCents,
+      wonCount,
+    };
+  }, [leads]);
 
   const upcomingDeadlines = useMemo(() => {
     const combined: Array<{
@@ -334,34 +359,65 @@ export function DashboardOverview({
         </div>
       </div>
 
-      {/* 30-Day Social Media Customer Acquisition Shortcut */}
-      <div className="bg-white border border-[#E6E2F0] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <CalendarDays className="w-5 h-5 text-[#4C1D95] mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-[#1C1B22]">
-              30-Day Customer Acquisition Social Calendar
-            </p>
-            {socialSummary.hasCalendar ? (
-              <p className="text-xs text-[#6E6A7C] mt-0.5 font-mono-tabular">
-                {socialSummary.doneMini}/{socialSummary.totalMini} daily mini-tasks done ·{' '}
-                {socialSummary.published}/30 days published
+      {/* Growth Row: 30-Day Social Calendar + Generated Leads */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white border border-[#E6E2F0] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <CalendarDays className="w-5 h-5 text-[#4C1D95] mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-[#1C1B22]">
+                30-Day Social Media Posts
               </p>
-            ) : (
-              <p className="text-xs text-[#6E6A7C] mt-0.5">
-                Generate 30 days of tailored posts and daily customer-getting mini-task checklists.
-              </p>
-            )}
+              {socialSummary.hasCalendar ? (
+                <p className="text-xs text-[#6E6A7C] mt-0.5 font-mono-tabular">
+                  {socialSummary.doneMini}/{socialSummary.totalMini} mini-tasks done ·{' '}
+                  {socialSummary.published}/30 published
+                </p>
+              ) : (
+                <p className="text-xs text-[#6E6A7C] mt-0.5">
+                  30 days of ready-to-post captions &amp; daily customer-getting checklists.
+                </p>
+              )}
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('social_calendar')}
+            className="px-4 py-2 text-xs font-semibold bg-[#F3EFFC] text-[#4C1D95] rounded-lg hover:bg-[#E8E0FA] flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            Open 30-Day Posts
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('social_calendar')}
-          className="px-4 py-2 text-xs font-semibold bg-[#F3EFFC] text-[#4C1D95] rounded-lg hover:bg-[#E8E0FA] flex items-center gap-1.5 whitespace-nowrap shrink-0"
-        >
-          {socialSummary.hasCalendar ? 'Open 30-Day Playbook' : 'Build 30-Day Calendar'}
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
+
+        <div className="bg-white border border-[#E6E2F0] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <UserPlus className="w-5 h-5 text-[#059669] mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-[#1C1B22]">
+                Lead CRM Kanban Board
+              </p>
+              {leadsSummary.total > 0 ? (
+                <p className="text-xs text-[#6E6A7C] mt-0.5 font-mono-tabular">
+                  {leadsSummary.activeCount} active ·{' '}
+                  {formatCurrencyCents(leadsSummary.openValueCents)} open · {leadsSummary.wonCount} won
+                </p>
+              ) : (
+                <p className="text-xs text-[#6E6A7C] mt-0.5">
+                  Track leads across New, Contacted, Qualified, Closed-Won &amp; Closed-Lost.
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('leads')}
+            className="px-4 py-2 text-xs font-semibold bg-[#ECFDF5] text-[#065F46] rounded-lg hover:bg-[#D1FAE5] flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            Open Lead CRM
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* 10-Category Operating Coverage Grid */}

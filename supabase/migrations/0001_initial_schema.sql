@@ -170,7 +170,7 @@ create table if not exists public.notifications (
   channel text not null check (channel in ('in_app', 'email')),
   title text not null,
   message text not null,
-  related_entity_type text not null check (related_entity_type in ('task', 'obligation', 'certification', 'blueprint')),
+  related_entity_type text not null check (related_entity_type in ('task', 'obligation', 'certification', 'blueprint', 'lead')),
   related_entity_id text not null,
   delivery_status text not null check (delivery_status in ('delivered', 'read', 'skipped_no_email_provider', 'failed')),
   scheduled_for date,
@@ -226,4 +226,25 @@ create table if not exists public.social_calendar_days (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (business_id, day_number)
+);
+
+create table if not exists public.leads (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  full_name text not null,
+  company_or_handle text not null default '',
+  email text not null default '',
+  phone text not null default '',
+  source_channel text not null,
+  source_post_day integer not null default 0 check (source_post_day between 0 and 30),
+  interest_summary text not null default '',
+  estimated_value_cents bigint not null default 0 check (estimated_value_cents >= 0),
+  stage text not null default 'new' check (stage in ('new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost')),
+  next_follow_up_date date,
+  last_contact_note text not null default '',
+  requires_outreach_approval boolean not null default true,
+  approved_for_outreach boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );

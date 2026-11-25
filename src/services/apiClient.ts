@@ -55,8 +55,13 @@ export async function generateBlueprintApi(
   return data;
 }
 
+export type AssistantRolePreset = 'advisor' | 'compliance' | 'marketing' | 'operations';
+export type AssistantModelTier = 'general' | 'fast';
+
 export async function sendAssistantMessageApi(params: {
   message: string;
+  rolePreset?: AssistantRolePreset;
+  modelTier?: AssistantModelTier;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   businessContext: {
     name: string;
@@ -70,7 +75,7 @@ export async function sendAssistantMessageApi(params: {
     overdueCount: number;
     upcomingItems: string[];
   };
-}): Promise<{ reply: string }> {
+}): Promise<{ reply: string; modelUsed?: string }> {
   const headers = await getAuthHeaders();
   const res = await fetch('/api/assistant/chat', {
     method: 'POST',
@@ -82,6 +87,55 @@ export async function sendAssistantMessageApi(params: {
     throw new Error(data.error || 'Assistant request failed.');
   }
   return data;
+}
+
+export type SupportedTranscribeMimeType =
+  | 'audio/webm'
+  | 'audio/mp4'
+  | 'audio/mpeg'
+  | 'audio/mp3'
+  | 'audio/wav'
+  | 'audio/ogg'
+  | 'audio/aac';
+
+export async function transcribeAudioApi(params: {
+  audioBase64: string;
+  mimeType: SupportedTranscribeMimeType;
+  promptHint?: string;
+}): Promise<{ transcript: string; model: string }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch('/api/audio/transcribe', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Audio transcription failed.');
+  }
+  return data;
+}
+
+export async function getLiveVoiceWebSocketUrl(params: {
+  voiceName: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+  role: 'advisor' | 'sales' | 'operations';
+  businessName: string;
+  industry: string;
+}): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('You must be signed in to start a live voice conversation.');
+  }
+  const token = await user.getIdToken();
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const query = new URLSearchParams({
+    token,
+    voice: params.voiceName,
+    role: params.role,
+    business: params.businessName.slice(0, 120),
+    industry: params.industry.slice(0, 100),
+  });
+  return `${wsProto}//${window.location.host}/api/live-voice?${query.toString()}`;
 }
 
 export async function createStripeCheckoutApi(
@@ -216,6 +270,30 @@ export async function generateSocialCalendarApi(params: {
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error || 'Failed to generate 30-day social media calendar.');
+  }
+  return data;
+}
+
+export async function draftLeadFollowUpApi(params: {
+  businessName: string;
+  industry: string;
+  activity: string;
+  leadName: string;
+  companyOrHandle: string;
+  sourceChannel: string;
+  sourcePostDay: number;
+  interestSummary: string;
+  stage: 'new' | 'contacted' | 'qualified' | 'proposal_sent' | 'won' | 'lost';
+}): Promise<{ draft: string }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch('/api/marketing/draft-lead-followup', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to generate follow-up message draft.');
   }
   return data;
 }

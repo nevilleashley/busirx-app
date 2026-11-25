@@ -322,7 +322,7 @@ service cloud.firestore {
         && data.channel in ['in_app', 'email']
         && isValidString(data.title, 1, 200)
         && isValidString(data.message, 1, 1000)
-        && data.relatedEntityType in ['task', 'obligation', 'certification', 'blueprint']
+        && data.relatedEntityType in ['task', 'obligation', 'certification', 'blueprint', 'lead']
         && isValidString(data.relatedEntityId, 0, 128)
         && data.deliveryStatus in ['delivered', 'read', 'skipped_no_email_provider', 'failed']
         && isValidString(data.scheduledFor, 0, 40)
@@ -407,6 +407,40 @@ service cloud.firestore {
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (!(data.requiresExternalPublishApproval && data.dayStatus == 'published') || data.approvedToPublish == true);
+    }
+
+    function isValidLead(data, businessId, leadId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'fullName', 'companyOrHandle', 'email',
+          'phone', 'sourceChannel', 'sourcePostDay', 'interestSummary',
+          'estimatedValueCents', 'stage', 'nextFollowUpDate', 'lastContactNote',
+          'requiresOutreachApproval', 'approvedForOutreach', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'fullName', 'companyOrHandle', 'email',
+          'phone', 'sourceChannel', 'sourcePostDay', 'interestSummary',
+          'estimatedValueCents', 'stage', 'nextFollowUpDate', 'lastContactNote',
+          'requiresOutreachApproval', 'approvedForOutreach', 'createdAt', 'updatedAt'
+        ])
+        && data.id == leadId && isValidId(data.id)
+        && data.businessId == businessId && isValidId(data.businessId)
+        && data.ownerUid == request.auth.uid
+        && isValidString(data.fullName, 1, 140)
+        && isValidString(data.companyOrHandle, 0, 140)
+        && isValidString(data.email, 0, 254)
+        && isValidString(data.phone, 0, 40)
+        && isValidString(data.sourceChannel, 1, 80)
+        && data.sourcePostDay is int && data.sourcePostDay >= 0 && data.sourcePostDay <= 30
+        && isValidString(data.interestSummary, 0, 500)
+        && data.estimatedValueCents is int && data.estimatedValueCents >= 0 && data.estimatedValueCents <= 1000000000
+        && data.stage in ['new', 'contacted', 'qualified', 'proposal_sent', 'won', 'lost']
+        && isValidString(data.nextFollowUpDate, 0, 30)
+        && isValidString(data.lastContactNote, 0, 1000)
+        && data.requiresOutreachApproval is bool
+        && data.approvedForOutreach is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!(data.requiresOutreachApproval && data.stage == 'proposal_sent') || data.approvedForOutreach == true);
     }
 
     // Users collection (strictly private PII)
@@ -677,6 +711,36 @@ service cloud.firestore {
             || incoming().diff(existing()).affectedKeys().hasOnly(['captionDraft', 'callToAction', 'hookOrAngle', 'scheduledDate', 'updatedAt'])
           );
         allow delete: if isValidId(dayId) && isBusinessOwner(businessId);
+      }
+
+      match /leads/{leadId} {
+        allow get: if isValidId(leadId) && isBusinessOwner(businessId);
+        allow list: if isVerifiedUser() && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(leadId)
+          && isBusinessOwner(businessId)
+          && isValidLead(incoming(), businessId, leadId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(leadId)
+          && isBusinessOwner(businessId)
+          && isValidLead(incoming(), businessId, leadId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'stage', 'approvedForOutreach', 'nextFollowUpDate', 'lastContactNote', 'updatedAt'
+            ])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullName', 'companyOrHandle', 'email', 'phone', 'sourceChannel',
+              'sourcePostDay', 'interestSummary', 'estimatedValueCents', 'stage',
+              'nextFollowUpDate', 'lastContactNote', 'requiresOutreachApproval',
+              'approvedForOutreach', 'updatedAt'
+            ])
+          );
+        allow delete: if isValidId(leadId) && isBusinessOwner(businessId);
       }
     }
   }

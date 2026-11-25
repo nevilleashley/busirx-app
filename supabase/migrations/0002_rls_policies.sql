@@ -12,6 +12,7 @@ alter table public.notifications enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.marketing_campaigns enable row level security;
 alter table public.social_calendar_days enable row level security;
+alter table public.leads enable row level security;
 
 -- Helper function verifying caller owns parent business
 create or replace function public.owns_business(target_business_id uuid)
@@ -160,4 +161,16 @@ with check (
   auth.uid() = owner_id
   and public.owns_business(business_id)
   and (not (requires_external_publish_approval and day_status = 'published') or approved_to_publish = true)
+);
+
+-- Generated Leads Pipeline
+create policy "leads_owner_all"
+on public.leads
+for all
+to authenticated
+using (auth.uid() = owner_id and public.owns_business(business_id))
+with check (
+  auth.uid() = owner_id
+  and public.owns_business(business_id)
+  and (not (requires_outreach_approval and stage = 'proposal_sent') or approved_for_outreach = true)
 );

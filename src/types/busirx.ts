@@ -222,7 +222,7 @@ export interface NotificationLogRecord {
   channel: 'in_app' | 'email';
   title: string;
   message: string;
-  relatedEntityType: 'task' | 'obligation' | 'certification' | 'blueprint';
+  relatedEntityType: 'task' | 'obligation' | 'certification' | 'blueprint' | 'lead';
   relatedEntityId: string;
   deliveryStatus: 'delivered' | 'read' | 'skipped_no_email_provider' | 'failed';
   scheduledFor: string;
@@ -274,6 +274,29 @@ export interface SocialCalendarDay {
   requiresExternalPublishApproval: boolean;
   approvedToPublish: boolean;
   dayStatus: 'planned' | 'ready' | 'published';
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type LeadStage = 'new' | 'contacted' | 'qualified' | 'proposal_sent' | 'won' | 'lost';
+
+export interface LeadRecord {
+  id: string;
+  businessId: string;
+  ownerUid: string;
+  fullName: string;
+  companyOrHandle: string;
+  email: string;
+  phone: string;
+  sourceChannel: string;
+  sourcePostDay: number;
+  interestSummary: string;
+  estimatedValueCents: number;
+  stage: LeadStage;
+  nextFollowUpDate: string;
+  lastContactNote: string;
+  requiresOutreachApproval: boolean;
+  approvedForOutreach: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

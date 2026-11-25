@@ -210,7 +210,7 @@
         "channel": { "type": "string", "enum": ["in_app", "email"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
-        "relatedEntityType": { "type": "string", "enum": ["task", "obligation", "certification", "blueprint"] },
+        "relatedEntityType": { "type": "string", "enum": ["task", "obligation", "certification", "blueprint", "lead"] },
         "relatedEntityId": { "type": "string", "maxLength": 128 },
         "deliveryStatus": { "type": "string", "enum": ["delivered", "read", "skipped_no_email_provider", "failed"] },
         "scheduledFor": { "type": "string", "maxLength": 40 },
@@ -281,6 +281,32 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "businessId", "ownerUid", "dayNumber", "scheduledDate", "platform", "contentPillar", "topicTitle", "hookOrAngle", "captionDraft", "callToAction", "miniTasks", "completedMiniTasks", "requiresExternalPublishApproval", "approvedToPublish", "dayStatus", "createdAt", "updatedAt"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Prospective customer lead captured from social posts, referrals, or outreach with follow-up stage and outreach approval tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "companyOrHandle": { "type": "string", "maxLength": 140 },
+        "email": { "type": "string", "maxLength": 254 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "sourceChannel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "sourcePostDay": { "type": "integer" },
+        "interestSummary": { "type": "string", "maxLength": 500 },
+        "estimatedValueCents": { "type": "integer" },
+        "stage": { "type": "string", "enum": ["new", "contacted", "qualified", "proposal_sent", "won", "lost"] },
+        "nextFollowUpDate": { "type": "string", "maxLength": 30 },
+        "lastContactNote": { "type": "string", "maxLength": 1000 },
+        "requiresOutreachApproval": { "type": "boolean" },
+        "approvedForOutreach": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "ownerUid", "fullName", "companyOrHandle", "email", "phone", "sourceChannel", "sourcePostDay", "interestSummary", "estimatedValueCents", "stage", "nextFollowUpDate", "lastContactNote", "requiresOutreachApproval", "approvedForOutreach", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -331,6 +357,10 @@
     "/businesses/{businessId}/socialCalendarDays/{dayId}": {
       "schema": { "$ref": "#/entities/SocialCalendarDay" },
       "description": "30-day customer acquisition social media content calendar with daily mini-tasks."
+    },
+    "/businesses/{businessId}/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/Lead" },
+      "description": "Generated customer leads pipeline linked to social posts and acquisition channels."
     }
   }
 }

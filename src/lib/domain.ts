@@ -210,7 +210,7 @@ export function buildTaskDedupeKey(businessId: string, blueprintItemId: string):
 }
 
 export function buildReminderDedupeKey(
-  entityType: 'task' | 'obligation' | 'certification' | 'blueprint',
+  entityType: 'task' | 'obligation' | 'certification' | 'blueprint' | 'lead',
   entityId: string,
   dueDate: string,
   channel: 'in_app' | 'email'

@@ -35,6 +35,7 @@ interface TeamFinanceGrowthViewProps {
   }) => Promise<void>;
   onApproveCampaign: (campaignId: string) => Promise<void>;
   onOpenSocialCalendar?: () => void;
+  onOpenLeads?: () => void;
 }
 
 export function TeamFinanceGrowthView({
@@ -46,6 +47,7 @@ export function TeamFinanceGrowthView({
   onCreateCampaign,
   onApproveCampaign,
   onOpenSocialCalendar,
+  onOpenLeads,
 }: TeamFinanceGrowthViewProps) {
   const [activeTab, setActiveTab] = useState<'finance' | 'team' | 'marketing'>('finance');
 
@@ -459,27 +461,42 @@ export function TeamFinanceGrowthView({
 
       {activeTab === 'marketing' && (
         <div className="space-y-6">
-          {onOpenSocialCalendar && (
+          {(onOpenSocialCalendar || onOpenLeads) && (
             <div className="bg-[#F3EFFC] border border-[#DDD6FE] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3">
                 <CalendarDays className="w-5 h-5 text-[#4C1D95] mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-[#1C1B22]">
-                    Need daily customer-getting steps? Open your 30-Day Social Media Calendar
+                    Ready-to-post 30-Day Social Content &amp; Lead CRM
                   </p>
                   <p className="text-xs text-[#4A4756] mt-0.5">
-                    Includes 30 ready-to-edit post drafts paired with daily mini-task checklists.
+                    Execute daily social posts with checklists and manage prospects in your Kanban
+                    Lead CRM board.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={onOpenSocialCalendar}
-                className="px-4 py-2 text-xs font-semibold bg-[#4C1D95] text-white rounded-lg hover:bg-[#3B1478] flex items-center gap-1.5 whitespace-nowrap shrink-0"
-              >
-                Open 30-Day Calendar
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {onOpenSocialCalendar && (
+                  <button
+                    type="button"
+                    onClick={onOpenSocialCalendar}
+                    className="px-4 py-2 text-xs font-semibold bg-[#4C1D95] text-white rounded-lg hover:bg-[#3B1478] flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    30-Day Posts
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onOpenLeads && (
+                  <button
+                    type="button"
+                    onClick={onOpenLeads}
+                    className="px-4 py-2 text-xs font-semibold bg-white border border-[#DDD6FE] text-[#4C1D95] rounded-lg hover:bg-[#FAF9FC] flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    Lead CRM
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
